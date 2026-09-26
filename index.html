@@ -714,21 +714,51 @@
       + '&location=' + enc(ev.place) + '&details=' + enc(ev.desc||'');
   }
   /* Detect a phone/tablet (iOS, iPadOS, Android). */
-  function isMobileDevice(){
+  function isIOSDevice(){
     const ua = navigator.userAgent || navigator.vendor || '';
-    const isIOS = /iPad|iPhone|iPod/.test(ua) ||
-      (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1); // iPadOS reports as Mac
-    const isAndroid = /Android/i.test(ua);
-    return isIOS || isAndroid;
+    return /iPad|iPhone|iPod/.test(ua) ||
+      (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
   }
+  function isAndroidDevice(){
+    return /Android/i.test(navigator.userAgent || navigator.vendor || '');
+  }
+  function isMobileDevice(){
+    return isIOSDevice() || isAndroidDevice();
+  }
+
+  /* Android's native Calendar intent is the closest browser-supported way
+     to hand the event directly to an installed calendar app. */
+  function openAndroidCalendar(ev){
+    const times = eventTimes(ev);
+    const startMs = new Date(times.start).getTime();
+    const endMs = new Date(times.end).getTime();
+
+    const title = encodeURIComponent(`${ev.en} — ${CONFIG.coupleShort}`);
+    const location = encodeURIComponent(ev.place || '');
+    const description = encodeURIComponent(ev.desc || '');
+
+    const intent =
+      `intent://insert/event?title=${title}&location=${location}&description=${description}` +
+      `#Intent;scheme=content;action=android.intent.action.INSERT;` +
+      `type=vnd.android.cursor.item/event;` +
+      `l.beginTime=${startMs};l.endTime=${endMs};end`;
+
+    window.location.href = intent;
+  }
+
   /* Single add-to-calendar entry point used everywhere on the page:
-     - Phones/tablets: use the native Share Sheet with a real .ics file,
-       allowing compatible calendar apps (Google Calendar, Apple Calendar, etc.)
-       to be selected instead of forcing a data: URL download.
+     - Android: try the native Calendar intent, without downloading an .ics.
+     - iPhone/iPad: use the native Share Sheet with a real .ics file;
+       compatible calendar apps can then accept the event.
      - If file sharing is unavailable: download a real .ics file.
      - Desktop/laptop: open Google Calendar directly in a new tab. */
   async function addToCalendar(ev){
-    if (isMobileDevice()){
+    if (isAndroidDevice()){
+      openAndroidCalendar(ev);
+      return;
+    }
+
+    if (isIOSDevice()){
       const ics = icsBody(ev);
       const file = new File(
         [ics],
@@ -759,10 +789,12 @@
       a.click();
       a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 1000);
-    } else {
-      window.open(gcalURL(ev), '_blank', 'noopener');
+      return;
     }
+
+    window.open(gcalURL(ev), '_blank', 'noopener');
   }
+  
   (function wireVenueCal(){
     const ceremony = CONFIG.events.find(e => e.en === 'Bibaho') || CONFIG.events[0];
     $('#btnCal').addEventListener('click', () => addToCalendar(ceremony));
